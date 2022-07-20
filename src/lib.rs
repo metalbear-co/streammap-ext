@@ -52,7 +52,7 @@ macro_rules! ready {
 /// to be merged, it may be advisable to use tasks sending values on a shared
 /// [`mpsc`] channel.
 ///
-/// [`StreamExt::merge`]: crate::StreamExt::merge
+/// [`StreamExt::merge`]: tokio_stream::StreamExt::merge
 /// [`mpsc`]: https://docs.rs/tokio/1.0/tokio/sync/mpsc/index.html
 /// [`pin!`]: https://docs.rs/tokio/1.0/tokio/macro.pin.html
 /// [`Box::pin`]: std::boxed::Box::pin
