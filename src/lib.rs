@@ -6,7 +6,6 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-
 macro_rules! ready {
     ($e:expr $(,)?) => {
         match $e {

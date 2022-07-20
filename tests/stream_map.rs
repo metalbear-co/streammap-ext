@@ -3,8 +3,8 @@ use tokio_test::{assert_ok, assert_pending, assert_ready, task};
 
 use streammap_ext::StreamMap;
 
-pub (crate) mod support {
-    pub (crate) mod mpsc {
+pub(crate) mod support {
+    pub(crate) mod mpsc {
 
         use async_stream::stream;
         use tokio::sync::mpsc::{self, UnboundedSender};
@@ -95,7 +95,7 @@ async fn single_entry() {
     assert_pending!(map.poll_next());
     drop(tx);
     assert!(map.is_woken());
-    
+
     let (k, v) = assert_ready_some!(map.poll_next());
     assert_eq!(k, "foo");
     assert_eq!(v, None);
@@ -353,7 +353,7 @@ fn one_ready_many_none() {
             results.push((k, v));
         }
         assert_eq!(results.len(), 4);
-        results.sort_by(| a, b | a.0.partial_cmp(&b.0).unwrap());
+        results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         let v = results.pop().unwrap();
         assert_eq!(v, (2, None));
 
