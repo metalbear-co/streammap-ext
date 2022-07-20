@@ -1,0 +1,250 @@
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+name: CI
+
+env:
+  RUSTFLAGS: -Dwarnings
+  RUST_BACKTRACE: 1
+  # Change to specific Rust release to pin
+  rust_stable: stable
+  rust_nightly: nightly-2022-04-18
+  rust_clippy: 1.52.0
+  rust_min: 1.49.0
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Depends on all action sthat are required for a "successful" CI run.
+  tests-pass:
+    name: all systems go
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - test-unstable
+      - test-parking_lot
+      - miri
+      - cross
+      - fmt
+      - clippy
+      - docs
+
+    steps:
+      - run: exit 0
+
+  test:
+    name: test tokio full
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ env.rust_stable }}
+            override: true
+      - name: Install Rust
+        run: rustup update stable
+      - uses: Swatinem/rust-cache@v1
+      - name: Install cargo-hack
+        run: cargo install cargo-hack
+
+      # Run `tokio` with `full` features. This excludes testing utilities which
+      # can alter the runtime behavior of Tokio.
+      - name: test tokio full
+        run: cargo test --features full
+        working-directory: tokio
+
+      # Test **all** crates in the workspace with all features.
+      - name: test all --all-features
+        run: cargo test --workspace --all-features
+
+
+
+  test-parking_lot:
+    # The parking_lot crate has a feature called send_guard which changes when
+    # some of its types are Send. Tokio has some measures in place to prevent
+    # this from affecting when Tokio types are Send, and this test exists to
+    # ensure that those measures are working.
+    #
+    # This relies on the potentially affected Tokio type being listed in
+    # `tokio/tokio/tests/async_send_sync.rs`.
+    name: compile tests with parking lot send guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ env.rust_stable }}
+            override: true
+      - uses: Swatinem/rust-cache@v1
+      - name: Enable parking_lot send_guard feature
+        # Inserts the line "plsend = ["parking_lot/send_guard"]" right after [features]
+        run: sed -i '/\[features\]/a plsend = ["parking_lot/send_guard"]' tokio/Cargo.toml
+      - name: Compile tests with all features enabled
+        run: cargo build --workspace --all-features --tests
+
+  test-unstable:
+    name: test tokio full --unstable
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ env.rust_stable }}
+            override: true
+      - uses: Swatinem/rust-cache@v1
+      # Run `tokio` with "unstable" cfg flag.
+      - name: test tokio full --cfg unstable
+        run: cargo test --all-features
+        working-directory: tokio
+        env:
+          RUSTFLAGS: --cfg tokio_unstable -Dwarnings
+          # in order to run doctests for unstable features, we must also pass
+          # the unstable cfg to RustDoc
+          RUSTDOCFLAGS: --cfg tokio_unstable
+
+  miri:
+    name: miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_nightly }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: miri
+          override: true
+      - uses: Swatinem/rust-cache@v1
+      - name: miri
+        # Many of tests in tokio/tests and doctests use #[tokio::test] or
+        # #[tokio::main] that calls epoll_create1 that Miri does not support.
+        run: cargo miri test --features full --lib --no-fail-fast
+        working-directory: tokio
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tag-raw-pointers
+          PROPTEST_CASES: 10
+
+  asan:
+    name: asan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install llvm
+        # Required to resolve symbols in sanitizer output
+        run: sudo apt-get install -y llvm
+      - name: Install Rust ${{ env.rust_nightly }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_nightly }}
+          override: true
+      - uses: Swatinem/rust-cache@v1
+      - name: asan
+        run: cargo test --workspace --all-features --target x86_64-unknown-linux-gnu --tests -- --test-threads 1
+        env:
+          RUSTFLAGS: -Z sanitizer=address
+          # Ignore `trybuild` errors as they are irrelevant and flaky on nightly
+          TRYBUILD: overwrite
+
+  cross:
+    name: cross
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - i686-unknown-linux-gnu
+          - powerpc-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - mips-unknown-linux-gnu
+          - arm-linux-androideabi
+          - mipsel-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_stable }}
+          target: ${{ matrix.target }}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: check
+          args: --workspace --all-features --target ${{ matrix.target }}
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: check
+          args: --workspace --all-features --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: --cfg tokio_unstable -Dwarnings
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_stable }}
+          override: true
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+      # Check fmt
+      - name: "rustfmt --check"
+        # Workaround for rust-lang/cargo#7732
+        run: |
+          if ! rustfmt --check --edition 2018 $(git ls-files '*.rs'); then
+            printf "Please run \`rustfmt --edition 2018 \$(git ls-files '*.rs')\` to fix rustfmt errors.\nSee CONTRIBUTING.md for more details.\n" >&2
+            exit 1
+          fi
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_clippy }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_clippy }}
+          override: true
+          components: clippy
+      - uses: Swatinem/rust-cache@v1
+      # Run clippy
+      - name: "clippy --all"
+        run: cargo clippy --all --tests --all-features
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.rust_nightly }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_nightly }}
+          override: true
+      - uses: Swatinem/rust-cache@v1
+      - name: "doc --lib --all-features"
+        run: cargo doc --lib --no-deps --all-features --document-private-items
+        env:
+          RUSTFLAGS: --cfg docsrs --cfg tokio_unstable
+          RUSTDOCFLAGS: --cfg docsrs --cfg tokio_unstable -Dwarnings
