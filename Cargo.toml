@@ -1,7 +1,7 @@
 [package]
 name = "streammap-ext"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
 license = "MIT"
 description = "StreamMap of Tokio with altered `next` that returns when stream is dropped"
 homepage = "https://github.com/metalbear-co/streammap-ext"
