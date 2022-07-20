@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - test
-      - test-parking_lot
       - cross
       - fmt
       - clippy
@@ -63,29 +62,6 @@ jobs:
 
 
 
-  test-parking_lot:
-    # The parking_lot crate has a feature called send_guard which changes when
-    # some of its types are Send. Tokio has some measures in place to prevent
-    # this from affecting when Tokio types are Send, and this test exists to
-    # ensure that those measures are working.
-    #
-    # This relies on the potentially affected Tokio type being listed in
-    # `tokio/tokio/tests/async_send_sync.rs`.
-    name: compile tests with parking lot send guards
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rust_stable }}
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: ${{ env.rust_stable }}
-            override: true
-      - uses: Swatinem/rust-cache@v1
-      - name: Enable parking_lot send_guard feature
-        # Inserts the line "plsend = ["parking_lot/send_guard"]" right after [features]
-        run: sed -i '/\[features\]/a plsend = ["parking_lot/send_guard"]' tokio/Cargo.toml
-      - name: Compile tests with all features enabled
-        run: cargo build --workspace --all-features --tests
 
 
   asan:
